@@ -27,7 +27,7 @@ jobs:
 
       - name: build docker image
         run: |
-          docker build -t test:01 .
+          docker build -t test:01 ./backend
           
       - name: test docker image
         run: |
