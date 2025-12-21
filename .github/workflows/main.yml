@@ -1,0 +1,34 @@
+# This is a basic workflow to help you get started with Actions
+name: Travel Memory with docker container
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow on push or pull request events but only for the "main" branch
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+jobs: 
+    build-and-test:
+      runs-on: ubuntu-latest
+
+      steps:
+      - name: checkout the code
+        uses: actions/checkout@v4
+  
+  #  Setup Node.js (required by your Dockerfile)
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+          with: 
+            node-version: "18"
+     
+      - name: steup the docker
+        uses: docker/setup-buildx-action@v3
+
+      - name: build docker image
+        run: |
+          docker build -t test:01 .
+          
+      - name: test docker image
+        run: |
+          docker run -itd  test:01 bash
