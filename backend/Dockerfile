@@ -1,4 +1,4 @@
 FROM node:20
 COPY . .
-RUN sudo install npm
+RUN sudo npm install
 CMD ["node","index.js"]
