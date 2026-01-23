@@ -4,7 +4,7 @@ pipeline {
         stage('checkout') {
             steps {
                 echo 'Checking out the code from repository...'
-                git 'https://github.com/vikramhemchandar/TravelMemory.git'
+                git branch: 'main', url: 'https://github.com/vikramhemchandar/TravelMemory.git'
             }
         }
 
@@ -12,9 +12,7 @@ pipeline {
             steps {
                 echo 'Installing the application...'
                 sh 'cd backend'
-                sh 'curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash \. "$HOME/.nvm/nvm.sh"'
-                sh 'nvm install 24'
-                
+                sh 'npm install'
             }
         }
 
