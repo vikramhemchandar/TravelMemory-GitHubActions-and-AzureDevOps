@@ -11,18 +11,14 @@ pipeline {
         stage('install') {
             steps {
                 echo 'Installing the application...'
-                sh 'cd backend'
-                sh 'npm install'
-                sh 'curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash \. "$HOME/.nvm/nvm.sh"'
-                sh 'nvm install 24'
+                sh 'cd backend; nvm install 24'
             }
         }
 
         stage('build') { 
             steps {
                 echo 'Building the application...'
-                sh 'cd backend'
-                sh 'npm run build'
+                sh 'cd backend; npm run build'
             }
         }
     }
