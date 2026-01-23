@@ -11,7 +11,7 @@ pipeline {
         stage('install') {
             steps {
                 echo 'Installing the application...'
-                sh 'cd backend; nvm install 24'
+                sh 'cd backend; npm install'
             }
         }
 
