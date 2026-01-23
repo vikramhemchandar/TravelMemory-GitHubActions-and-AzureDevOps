@@ -11,7 +11,7 @@ pipeline {
         stage('install') {
             steps {
                 echo 'Installing the application...'
-                sh 'cd backend; npm install'
+                sh 'cd backend; node -v; npm -v; npm install'
             }
         }
 
