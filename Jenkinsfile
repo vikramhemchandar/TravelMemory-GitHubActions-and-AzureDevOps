@@ -13,6 +13,8 @@ pipeline {
                 echo 'Installing the application...'
                 sh 'cd backend'
                 sh 'npm install'
+                sh 'curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash \. "$HOME/.nvm/nvm.sh"'
+                sh 'nvm install 24'
             }
         }
 
