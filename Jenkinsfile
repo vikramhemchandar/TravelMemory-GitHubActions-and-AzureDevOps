@@ -1,23 +1,23 @@
 pipeline {
     agent any // Tells Jenkins where to run the pipeline
     stages {
-        stage('checkout') {
+        stage('Checkout') {
             steps {
-                echo 'Checking out the code from repository...'
+                //echo 'Checking out the code from repository...'
                 git branch: 'main', url: 'https://github.com/vikramhemchandar/TravelMemory.git'
             }
         }
 
-        stage('install') {
+        stage('Install') {
             steps {
-                echo 'Installing the application...'
+                //echo 'Installing the application...'
                 sh 'cd backend; npm install'
             }
         }
 
-        stage('build') { 
+        stage('Build') { 
             steps {
-                echo 'Building the application...'
+                //echo 'Building the application...'
                 sh 'cd backend; npm run build'
             }
         }
