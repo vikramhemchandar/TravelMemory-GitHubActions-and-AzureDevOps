@@ -48,9 +48,7 @@ For the application to be accessible to the public, the appropriate network port
 
 ## Step 4: Create the Pipeline (`azure-pipelines.yml`)
 
-The pipeline will execute the exact commands from your documentation.
-
-> **Important Note:** In the manual steps, commands like `node index.js` and `npm start` run in the foreground. If an automated pipeline runs these commands exactly as-is, the pipeline will hang forever waiting for the server to stop. To fix this, the commands in the pipeline are wrapped in `nohup ... &` to run them in the background. Additionally, `sudo PORT=80` is prefixed to the frontend command to fulfill the requirement of running it on Port 80 instead of the default 3000.
+The pipeline will execute the exact commands from your documentation, but adjusted with advanced configurations to survive the background process cleanup of the Azure DevOps Agent.
 
 Create an `azure-pipelines.yml` file in the root of your repository and paste the following configuration:
 
@@ -58,7 +56,6 @@ Create an `azure-pipelines.yml` file in the root of your repository and paste th
 trigger:
   - main
 
-# Import the variables we created in Step 2
 variables:
   - group: TravelMemory-Vars
 
@@ -71,58 +68,120 @@ jobs:
       runOnce:
         deploy:
           steps:
-            # Step 1: Cloning the Repository
-            # Azure DevOps automatically clones your repo to the VM using this checkout step
             - checkout: self  
             
-            # Clean up: Kill any previously running Node servers before starting new ones
+            # This explicitly injects Node.js & NPM into the pipeline agent's PATH
+            - task: NodeTool@0
+              inputs:
+                versionSpec: '18.x'
+              displayName: 'Install Node.js'
+            
+            # Clean up: Kill ONLY our app servers, not the pipeline agent!
             - script: |
-                sudo pkill node || true
+                sudo pkill -f "node index.js" || true
+                sudo pkill -f "react-scripts" || true
               displayName: 'Stop previous servers'
 
             # ---------------------------------------------
-            # BACKEND DEPLOYMENT (Based on backend.md)
+            # BACKEND DEPLOYMENT
             # ---------------------------------------------
             - script: |
-                # Step 2: Navigate to the Backend Folder
                 cd $(System.DefaultWorkingDirectory)/backend
                 
-                # Step 3: Create the .env File
                 echo "MONGO_URI=$(MONGO_URI)" > .env
                 echo "PORT=$(BACKEND_PORT)" >> .env
                 
-                # Step 4: Install Necessary Packages
                 npm install
                 
-                # Step 5: Run the Backend Application
-                nohup node index.js > backend.log 2>&1 &
+                # We use NodeTool@0 so 'node' is found.
+                # Added sudo env PATH=$PATH $(which node) so Azure DevOps can't kill it!
+                sudo env PATH=$PATH nohup $(which node) index.js </dev/null > backend.log 2>&1 &
               displayName: 'Deploy Backend'
 
             # ---------------------------------------------
-            # FRONTEND DEPLOYMENT (Based on frontend.md)
+            # FRONTEND DEPLOYMENT
             # ---------------------------------------------
             - script: |
-                # Step 2: Navigate to Your Frontend Directory
                 cd $(System.DefaultWorkingDirectory)/frontend
-                
-                # Step 3: Create the .env File
+      
                 echo "REACT_APP_BACKEND_URL=$(REACT_APP_BACKEND_URL)" > .env
                 
-                # Step 4: Install Required Packages
                 npm install
                 
-                # Step 5: Run Your Application
-                # (Running with PORT=80 to meet your requirement)
-                sudo PORT=80 nohup npm start > frontend.log 2>&1 &
+                # We use env PATH=$PATH and $(which npm) so sudo doesn't lose track of NPM
+                sudo BROWSER=none PORT=80 env PATH=$PATH nohup $(which npm) start </dev/null > frontend.log 2>&1 &
               displayName: 'Deploy Frontend'
+
+            # ---------------------------------------------
+            # FIX PERMISSIONS FOR THE NEXT RUN
+            # ---------------------------------------------
+            - script: |
+                sudo chown -R $USER:$USER $(System.DefaultWorkingDirectory)
+              displayName: 'Fix Folder Permissions for Next Run'
+              condition: always()
 ```
+
+### Detailed Explanation of Pipeline Steps
+
+1. **Trigger and Variables**
+   - `trigger: - main`: Automatically runs the pipeline whenever code is pushed to the `main` branch.
+   - `variables: - group: TravelMemory-Vars`: Injects the environment variables (like `MONGO_URI` and `PORT`) from the Azure DevOps Library into the pipeline so they can be securely written to `.env` files.
+
+2. **Environment & Strategy**
+   - `environment: name: 'TravelMemory-VM'`: Tells Azure DevOps to run this specific job directly on the Virtual Machine where you installed the agent.
+   - `checkout: self`: Automatically pulls the latest code from your repository into the VM's working directory (`$(System.DefaultWorkingDirectory)`).
+
+3. **Install Node.js Task (`NodeTool@0`)**
+   - The Azure DevOps Agent runs as a background service and does not have access to your personal `.bashrc` profile, meaning it cannot natively find commands like `node` or `npm`.
+   - This step forces Azure DevOps to explicitly download Node.js 18.x and inject it directly into the pipeline's system `PATH`.
+
+4. **Stop Previous Servers Script**
+   - Before deploying new code, we must kill the old running servers to prevent "Port already in use" errors.
+   - We use `sudo pkill -f "node index.js"` instead of a broad `pkill node` because the Azure DevOps Agent itself relies on Node.js! If we kill all `node` processes, we kill the agent and the pipeline fails.
+
+5. **Deploy Backend Script**
+   - Navigates to the backend folder and securely writes the variables from Azure DevOps to the local `.env` file.
+   - Runs `npm install` to download dependencies.
+   - `sudo env PATH=$PATH nohup $(which node) index.js </dev/null > backend.log 2>&1 &`: 
+     - **`sudo env PATH=$PATH $(which node)`**: Runs the backend with Admin privileges while forcing `sudo` to remember where Node is installed.
+     - **`nohup ... &`**: Runs the process in the background so the pipeline can move on.
+     - **`</dev/null`**: Completely detaches the process from Azure DevOps inputs. Without this, Azure DevOps will aggressively kill the backend process at the end of the job (Process Cleanup feature).
+
+6. **Deploy Frontend Script**
+   - Navigates to the frontend folder and creates its `.env` file.
+   - Runs `npm install`.
+   - `sudo BROWSER=none PORT=80 env PATH=$PATH nohup $(which npm) start </dev/null > frontend.log 2>&1 &`:
+     - **`PORT=80`**: Forces the React development server to run on the standard HTTP Port 80 instead of the default 3000.
+     - **`BROWSER=none`**: Prevents React from trying to launch an interactive web browser window on the VM, which would cause the CI/CD pipeline to hang.
+
+7. **Fix Folder Permissions for Next Run**
+   - Because we ran the frontend using `sudo npm start`, React created cache files (like babel and eslint caches) inside `node_modules` that are strictly owned by the `root` user.
+   - When the next pipeline triggers, the `checkout: self` step runs as the normal `azureuser` and will fail with a **Permission Denied** error when trying to clean the workspace.
+   - This `condition: always()` script forces the ownership of the files back to the normal user at the very end of the pipeline, ensuring the workspace is perfectly clean for the next deployment.
 
 ---
 
-## Step 6: Run and Verify
+## Step 5: Run and Verify
 
 1. **Commit and Push:** Save the `azure-pipelines.yml` file and push it to your repository.
 2. **Trigger Pipeline:** In Azure DevOps, the pipeline will trigger automatically upon detecting the new commit in the `main` branch.
-3. **Verify Deployment:** Once the pipeline succeeds, open your web browser and navigate to `http://<YOUR_VM_PUBLIC_IP>`. 
+3. **Verify Deployment:** Once the pipeline succeeds, open your web browser and navigate to `http://<YOUR_VM_PUBLIC_IP>`. You do not need to append the port number since the frontend runs on Port 80.
    
-The frontend should be running on Port 80 and properly communicating with your backend on Port 3001!
+The frontend should be successfully communicating with your backend on Port 3001!
+
+---
+
+## Common Troubleshooting
+
+### 1. "The agent has received a shutdown signal"
+The Azure DevOps Agent runs on Node.js under the hood. If you run a generic cleanup command like `sudo pkill node`, it kills the Azure Pipelines Agent, causing the deployment to fail instantly. Always use specific names like `sudo pkill -f "node index.js"`.
+
+### 2. "Command not found: node" or "npm"
+The Azure DevOps background service does not read your `.bashrc` profile, so it doesn't know where Node is installed. To fix this, always include the `NodeTool@0` task in your pipeline to inject Node into the PATH, and use `$(which node)` when using `sudo`.
+
+### 3. Backend starts but immediately crashes (Missing from netstat)
+If the backend logs show it started, but you cannot connect on port 3001, it crashed after startup. Since Azure assigns new Public IPs when VMs are rebooted, **MongoDB Atlas** will block the new IP. Ensure your VM's public IP is whitelisted in MongoDB Atlas under Network Access.
+
+### 4. Permission Denied during "Checkout" Step
+Running `sudo npm start` creates cache files owned by the `root` user in your workspace. When the next pipeline attempts to pull code, the normal agent user cannot clean up these files. We solve this by adding a `condition: always()` step at the end of the pipeline that runs `sudo chown -R $USER:$USER $(System.DefaultWorkingDirectory)` to reset ownership.
+

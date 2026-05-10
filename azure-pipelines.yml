@@ -1,7 +1,6 @@
 trigger:
   - main
 
-# Import the variables we created in Step 2
 variables:
   - group: TravelMemory-Vars
 
@@ -14,47 +13,56 @@ jobs:
       runOnce:
         deploy:
           steps:
-            # Step 1: Cloning the Repository
-            # Azure DevOps automatically clones your repo to the VM using this checkout step
             - checkout: self  
             
-            # Clean up: Kill any previously running Node servers before starting new ones
+            # This explicitly injects Node.js & NPM into the pipeline agent's PATH
+            - task: NodeTool@0
+              inputs:
+                versionSpec: '18.x'
+              displayName: 'Install Node.js'
+            
+            # Clean up: Kill ONLY our app servers, not the pipeline agent!
             - script: |
-                sudo pkill node || true
+                sudo pkill -f "node index.js" || true
+                sudo pkill -f "react-scripts" || true
               displayName: 'Stop previous servers'
 
             # ---------------------------------------------
-            # BACKEND DEPLOYMENT (Based on backend.md)
+            # BACKEND DEPLOYMENT
             # ---------------------------------------------
             - script: |
-                # Step 2: Navigate to the Backend Folder
                 cd $(System.DefaultWorkingDirectory)/backend
                 
-                # Step 3: Create the .env File
                 echo "MONGO_URI=$(MONGO_URI)" > .env
                 echo "PORT=$(BACKEND_PORT)" >> .env
                 
-                # Step 4: Install Necessary Packages
                 npm install
                 
-                # Step 5: Run the Backend Application
-                nohup node index.js > backend.log 2>&1 &
+                # Because we used NodeTool@0, 'node' will now be found
+                # Added sudo env PATH=$PATH $(which node) so Azure DevOps can't kill it!
+                sudo env PATH=$PATH nohup $(which node) index.js </dev/null > backend.log 2>&1 &
+
               displayName: 'Deploy Backend'
 
+
             # ---------------------------------------------
-            # FRONTEND DEPLOYMENT (Based on frontend.md)
+            # FRONTEND DEPLOYMENT
             # ---------------------------------------------
             - script: |
-                # Step 2: Navigate to Your Frontend Directory
                 cd $(System.DefaultWorkingDirectory)/frontend
-                
-                # Step 3: Create the .env File
+      
                 echo "REACT_APP_BACKEND_URL=$(REACT_APP_BACKEND_URL)" > .env
                 
-                # Step 4: Install Required Packages
                 npm install
                 
-                # Step 5: Run Your Application
-                # (Running with PORT=80 to meet your requirement)
-                sudo PORT=80 nohup npm start > frontend.log 2>&1 &
+                # We use env PATH=$PATH and $(which npm) so sudo doesn't lose track of NPM
+                sudo BROWSER=none PORT=80 env PATH=$PATH nohup $(which npm) start </dev/null > frontend.log 2>&1 &
               displayName: 'Deploy Frontend'
+
+            # ---------------------------------------------
+            # FIX PERMISSIONS FOR THE NEXT RUN
+            # ---------------------------------------------
+            - script: |
+                sudo chown -R $USER:$USER $(System.DefaultWorkingDirectory)
+              displayName: 'Fix Folder Permissions for Next Run'
+              condition: always()
